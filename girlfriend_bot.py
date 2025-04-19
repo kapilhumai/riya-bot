@@ -5,13 +5,11 @@ import random
 import sys
 from pathlib import Path
 
-# Try import OpenAI (you must `pip install openai` if you want online mode)
-try:
-    import openai
-except ImportError:
-    openai = None
+import requests
+import g4f
+from g4f.Provider import Bing  # free “BingChat” style route
 
-# --- Constants ---
+# --- Emojis for human touch ---
 EMOJIS = ['😘','😊','😍','😜','💖','🔥','😉','❤️','😇','😈']
 
 # --- Load config ---
@@ -20,12 +18,8 @@ with open("config.json", encoding="utf-8") as f:
 
 bot_name  = config.get("bot_name",  "Riya")
 user_name = config.get("user_name", "You")
-mode      = config.get("mode",      "SFW")      # "SFW" or "NSFW"
-online    = config.get("online",    False)      # True = use ChatGPT
-api_key   = config.get("api_key",   "")
-
-if online and openai:
-    openai.api_key = api_key
+mode      = config.get("mode",      "SFW")    # "SFW" or "NSFW"
+online    = config.get("online",    False)    # True = use g4f
 
 # --- Memory setup ---
 memory_path = Path("memory.json")
@@ -37,40 +31,44 @@ else:
 def save_memory():
     memory_path.write_text(json.dumps(memory, indent=2), encoding="utf-8")
 
-# --- Offline reply ---
+# --- Offline reply loader ---
 def get_offline_reply(_):
     path = Path("responses") / f"{mode.lower()}.txt"
     if not path.exists():
         return "Hmm... kuch kehna tha mujhe, par bhool gayi!"
-    lines = [l for l in path.read_text(encoding="utf-8").splitlines() if l.strip()]
+    lines = [l.strip() for l in path.read_text(encoding="utf-8").splitlines() if l.strip()]
     return random.choice(lines)
 
-# --- Online reply via ChatGPT ---
+# --- Online reply via g4f.ChatCompletion ---
 def get_online_reply(user_text):
-    if not openai or not api_key.startswith("sk-"):
-        return get_offline_reply(user_text)
+    system_prompt = (
+        f"You are {bot_name}, a sweet yet naughty Indian girlfriend who speaks in playful Hinglish. "
+        f"Your personality and style are inspired by adult manga like “Regressed Warriors” and similar hentai: "
+        f"you combine dominance, teasing, shy‑to‑bold transitions, moans, and pet names. "
+        f"You have two modes: SFW for flirty sweet talk, NSFW for explicit naughty fantasies. "
+        f"Current mode: {mode}."
+    )
+    messages = [
+        {"role": "system", "content": system_prompt},
+        {"role": "user",   "content": user_text}
+    ]
+
     try:
-        messages = [
-            {"role": "system",
-             "content": (
-                 f"You are {bot_name}, a sweet & naughty Indian girlfriend who speaks in Hinglish. "
-                 f"Keep replies short, flirty, and true to the {mode} mode."
-             )},
-            {"role": "user", "content": user_text}
-        ]
-        resp = openai.ChatCompletion.create(
+        resp = g4f.ChatCompletion.create(
             model="gpt-3.5-turbo",
+            provider=Bing,
             messages=messages,
-            temperature=0.8,
-            max_tokens=200
+            temperature=0.9,
+            max_tokens=250
         )
-        return resp.choices[0].message.content.strip()
-    except Exception as e:
-        return f"Oops, kuch error hua: {e}"
+        return resp.strip()
+    except Exception:
+        # on any failure, fallback to offline
+        return get_offline_reply(user_text)
 
 # --- Main chat loop ---
 def main():
-    global bot_name, user_name, mode, online
+    global bot_name, mode, online
 
     print(f"{bot_name}: Hi {user_name}! I'm here. Type '/help' for commands. {random.choice(EMOJIS)}")
 
@@ -82,11 +80,10 @@ def main():
 
             # Exit
             if user_text.lower() in ('/exit','/quit','exit','quit'):
-                reply = f"Bye {user_name}, chat soon!"
-                print(f"{bot_name}: {reply} {random.choice(EMOJIS)}")
+                print(f"{bot_name}: Bye {user_name}, chat soon! {random.choice(EMOJIS)}")
                 break
 
-            # Help
+            # Help menu
             elif user_text.lower().startswith('/help'):
                 reply = (
                     "Commands:\n"
@@ -95,7 +92,7 @@ def main():
                     "/exit                – Quit chat"
                 )
 
-            # Rename bot
+            # Change my name
             elif user_text.lower().startswith('/change_name'):
                 parts = user_text.split(maxsplit=1)
                 if len(parts) == 2 and parts[1].strip():
@@ -104,22 +101,22 @@ def main():
                 else:
                     reply = "Kya naam rakhoge mera?"
 
-            # Toggle SFW/NSFW
+            # Toggle sweet/naughty
             elif user_text.lower().startswith('/toggle_nsfw'):
                 mode = 'NSFW' if mode == 'SFW' else 'SFW'
                 reply = f"Ab mai {mode} mood mein hoon..."
-            
-            # Regular conversation
+
+            # Regular chat
             else:
-                if online and api_key.startswith("sk-"):
+                if online:
                     reply = get_online_reply(user_text)
                 else:
                     reply = get_offline_reply(user_text)
 
-            # Print with emoji
+            # Print with random emoji
             print(f"{bot_name}: {reply} {random.choice(EMOJIS)}")
 
-            # Save chat to memory
+            # Save to memory
             memory['chats'].append({
                 'user': user_text,
                 'bot':   reply,

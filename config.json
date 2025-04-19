@@ -1,7 +1,6 @@
 {
-  "bot_name": "Riya",
+  "bot_name":  "Riya",
   "user_name": "You",
-  "mode": "sfw",
-  "online": true,
-  
+  "mode":      "SFW",    // or "NSFW"
+  "online":    true      // true = use g4f, false = offline only
 }

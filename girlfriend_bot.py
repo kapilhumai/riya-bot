@@ -1,146 +1,111 @@
 #!/usr/bin/env python3
-import json, time, random, sys, threading
+import json
+import random
+import time
 from pathlib import Path
 
-import requests
 import g4f
-from g4f.Provider import Bing
+from g4f.Provider import You
 
-# ── Configuration & State ─────────────────────────────────────────
-with open("config.json", encoding="utf-8") as f:
+# ─── Load config ──────────────────────────────────────────────────
+with open("config.json", "r", encoding="utf-8") as f:
     cfg = json.load(f)
 
 bot_name  = cfg.get("bot_name",  "Riya")
 user_name = cfg.get("user_name", "You")
-mode      = cfg.get("mode",      "SFW")    # "SFW" or "NSFW"
-online    = cfg.get("online",    False)    # True = use g4f
+mode      = cfg.get("mode",      "nsfw").lower()   # 'sfw' or 'nsfw'
+online    = cfg.get("online",    True)            # use g4f if True
 
-MEM_PATH = Path("memory.json")
-if MEM_PATH.exists():
-    memory = json.loads(MEM_PATH.read_text(encoding="utf-8"))
-else:
-    memory = {"chats": []}
+print(f"🔧 DEBUG: online={online}   mode={mode.upper()}")
 
-def save_memory():
-    MEM_PATH.write_text(json.dumps(memory, indent=2), encoding="utf-8")
-
-# ── Load offline responses ────────────────────────────────────────
-def load_lines(fn):
-    path = Path("responses") / fn
-    if not path.exists(): return []
-    return [l.strip() for l in path.read_text(encoding="utf-8").splitlines() if l.strip()]
+# ─── Load offline responses ────────────────────────────────────────
+def load_lines(fname):
+    p = Path("responses") / fname
+    if not p.exists():
+        return []
+    return [L.strip() for L in p.read_text(encoding="utf-8").splitlines() if L.strip()]
 
 sfw_lines  = load_lines("sfw.txt")
 nsfw_lines = load_lines("nsfw.txt")
 
-# ── Auto‑message setup ────────────────────────────────────────────
-EMOJIS = ['😘','😊','😍','😜','💖','🔥','😉','❤️','😇','😈']
-AUTO_MIN = 45   # seconds
-AUTO_MAX = 90
+def offline_reply(_):
+    pool = nsfw_lines if mode == "nsfw" else sfw_lines
+    return random.choice(pool) if pool else "Hmm... kuch kehna tha mujhe, par bhool gayi!"
 
-last_user_time = time.monotonic()
-
-def schedule_auto():
-    def job():
-        global last_user_time
-        wait = random.uniform(AUTO_MIN, AUTO_MAX)
-        time.sleep(wait)
-        # only send if user silent
-        if time.monotonic() - last_user_time >= wait:
-            line = (nsfw_lines if mode=="NSFW" else sfw_lines) or ["Tumhare bina bohot akela mehsoos ho raha hai..."]
-            print(f"\n{bot_name} (auto): {random.choice(line)} {random.choice(EMOJIS)}")
-    threading.Thread(target=job, daemon=True).start()
-
-# ── Online via g4f ────────────────────────────────────────────────
+# ─── Personality system prompt ────────────────────────────────────
 SYSTEM_PROMPT = (
-    f"You are {bot_name}, a sweet yet daring Indian girlfriend who speaks in playful Hinglish. "
-    "Your style is inspired by adult manga: you blend gentle affection with teasing dominance. "
-    "Use moans, pet names like 'jaan', 'baby', and describe fantasies vividly in NSFW mode. "
-    "In SFW mode be sweet and caring. Never break character."
+    f"You are {bot_name}, a sweet yet naughty Indian girlfriend who speaks in playful Hinglish. "
+    f"You call {user_name} affectionate names like 'jaan', 'baby', or 'kapilu'. "
+    "In SFW mode you're flirty and romantic; in NSFW mode you can be teasing and erotic but never vulgar. "
+    "Never break character—always reply as her."
 )
 
-def get_online_reply(text):
-    try:
-        resp = g4f.ChatCompletion.create(
-            model="gpt-3.5-turbo",
-            provider=Bing,
-            messages=[
-                {"role":"system","content":SYSTEM_PROMPT},
-                {"role":"user","content":text}
-            ],
-            temperature=0.9,
-            max_tokens=250
-        )
-        return resp.strip()
-    except:
-        return None
+# ─── Chat context ──────────────────────────────────────────────────
+chat_history = [{"role": "system", "content": SYSTEM_PROMPT}]
 
-# ── Offline fallback ──────────────────────────────────────────────
-def get_offline_reply(_):
-    lines = nsfw_lines if mode=="NSFW" else sfw_lines
-    return random.choice(lines) if lines else "Hmm... kuch kehna tha mujhe, par bhool gayi!"
+# ─── Initial Greeting ──────────────────────────────────────────────
+greetings = [
+    f"Hey {user_name}... kya kar rahe ho abhi? Mujhe yaad kiya?",
+    f"{user_name}, main thodi bored hoon... thoda pyaar karoge?",
+    f"Aaj tum bohot handsome lag rahe ho, {user_name}!"
+]
+print(f"{bot_name}: {random.choice(greetings)}")
 
-# ── Main Chat Loop ───────────────────────────────────────────────
-def main():
-    global bot_name, mode, last_user_time
+# ─── Main Loop ────────────────────────────────────────────────────
+while True:
+    user_input = input(f"{user_name}: ").strip()
+    if not user_input:
+        continue
 
-    print(f"{bot_name}: Hi {user_name}! Type '/help' for commands. {random.choice(EMOJIS)}")
-    schedule_auto()
+    cmd = user_input.lower()
 
-    try:
-        while True:
-            user_text = input(f"{user_name}: ").strip()
-            last_user_time = time.monotonic()
-            # schedule next auto
-            schedule_auto()
+    # Exit
+    if cmd in ("/exit","exit","/quit","quit"):
+        print(f"{bot_name}: Bye {user_name}! Love you ❤️")
+        break
 
-            # commands
-            cmd = user_text.lower()
-            if cmd in ('/exit','exit','/quit','quit'):
-                print(f"{bot_name}: Bye {user_name}! {random.choice(EMOJIS)}")
-                break
+    # Help
+    if cmd == "/help":
+        print(f"{bot_name}: Commands:\n"
+              "  /help          Show this help\n"
+              "  /toggle_nsfw   Switch SFW/NSFW mode\n"
+              "  /toggle_online Switch online/offline mode\n"
+              "  /exit          Quit chat")
+        continue
 
-            if cmd.startswith('/help'):
-                reply = (
-                    "Commands:\n"
-                    "/change_name <name>  – Rename me\n"
-                    "/toggle_nsfw         – Switch SFW/NSFW\n"
-                    "/exit                – Quit chat"
-                )
+    # Toggle SFW/NSFW
+    if cmd == "/toggle_nsfw":
+        mode = "sfw" if mode == "nsfw" else "nsfw"
+        print(f"{bot_name}: Mode switched to {mode.upper()}")
+        continue
 
-            elif cmd.startswith('/change_name'):
-                parts = user_text.split(maxsplit=1)
-                if len(parts)==2:
-                    bot_name = parts[1].strip()
-                    reply = f"Thik hai, ab se mera naam {bot_name} hai!"
-                else:
-                    reply = "Kya naam rakhoge mera?"
+    # Toggle online/offline
+    if cmd == "/toggle_online":
+        online = not online
+        print(f"{bot_name}: Online mode is now {'ON' if online else 'OFF'}")
+        continue
 
-            elif cmd.startswith('/toggle_nsfw'):
-                mode = "NSFW" if mode=="SFW" else "SFW"
-                reply = f"Ab mai {mode} mood mein hoon..."
+    # Generate reply
+    if online:
+        chat_history.append({"role": "user", "content": user_input})
+        try:
+            resp = g4f.ChatCompletion.create(
+                model="gpt-4-turbo",
+                provider=You,
+                messages=chat_history[-10:],  # keep last 10 msgs
+                temperature=0.8,
+                max_tokens=200
+            )
+            reply = resp.strip() if isinstance(resp, str) else str(resp)
+        except Exception:
+            reply = offline_reply(user_input)
+    else:
+        reply = offline_reply(user_input)
 
-            else:
-                # normal chat
-                if online:
-                    reply = get_online_reply(user_text) or get_offline_reply(user_text)
-                else:
-                    reply = get_offline_reply(user_text)
+    # Print and record
+    print(f"{bot_name}: {reply}")
+    if online:
+        chat_history.append({"role": "assistant", "content": reply})
 
-            print(f"{bot_name}: {reply} {random.choice(EMOJIS)}")
-
-            memory['chats'].append({
-                'user': user_text,
-                'bot': reply,
-                'mode': mode,
-                'time': time.time()
-            })
-            save_memory()
-
-    except (KeyboardInterrupt, EOFError):
-        print(f"\n{bot_name}: Bye {user_name}! {random.choice(EMOJIS)}")
-        save_memory()
-        sys.exit(0)
-
-if __name__=="__main__":
-    main()
+    # small pause for realism
+    time.sleep(0.5)
